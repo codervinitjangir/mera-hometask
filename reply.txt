@@ -2,17 +2,17 @@ Hi Meenakshi,
 
 Thank you for your clarifications. Dr. Rao is away, so for the questions only the doctors can answer I used careful working rules. Anyone I am unsure about is on the "Check first" list for a doctor, not the call list. Please tell me if Dr. Rao wants any rule changed.
 
-We separated the Diabetic Follow-Up Call List into three clear groups so your front desk can start calling safely on Monday:
+We grouped the records so your front desk can start calling safely on Monday:
 
-1. Call Now (39 patients): Confirmed Type 1 and Type 2 diabetic patients who are overdue and have a valid phone number. We used the doctor's noted return date (or 3 months when blank), flagged patients between 3–6 months whose sugars were noted as controlled, highlighted shared family phone numbers, and noted recent visits to other departments (like Ortho, Dental, or ENT).
+1. Call Now (39 patients): Confirmed Type 1 and 2 diabetics overdue for follow-up with a valid phone. We used doctor-noted return dates (or a 3-month fallback), flagged controlled sugars, and highlighted shared family numbers, non-diabetes visits, and recent lab tests.
 
-2. Check First (26 records — hold for file check or Dr. Rao's input):
-- 7 records (4 people) that appear to be duplicate registrations from forgotten cards.
-- 3 overdue patients with missing phone numbers.
+2. Check First (26 records — hold for doctor or file check):
+- 7 records (4 patients) likely re-registered when forgetting cards.
+- 3 overdue patients missing phone numbers.
 - 9 patients with high sugar labs but no recorded diagnosis or medication.
-- 7 patients with pregnancy diabetes (GDM) or borderline sugar (prediabetes).
+- 7 patients with pregnancy diabetes (GDM) or borderline prediabetes.
 
-3. Excluded (52 patients): 34 up-to-date diabetics, 4 PCOS patients on Metformin, 3 relocated patients, and 3 deceased patients noted in visit records.
+3. Excluded (52 patients): 34 up-to-date diabetics, 4 PCOS patients on Metformin, 3 relocated, and 3 deceased patients noted in records.
 
 Best regards,
 Vinit
