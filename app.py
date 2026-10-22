@@ -85,8 +85,11 @@ def parse_review_days_from_notes(note):
     if not note:
         return None, None
     n = note.lower()
-    if any(p in n for p in ["review sos", "rpt yearly", "review yearly", "review 1 yr"]):
-        return 365, "Doctor note: yearly / SOS (365d)"
+    # NOTE: "review SOS" means "return if symptoms arise" — it is NOT a scheduled interval.
+    # Treating SOS as 365d was a logic error (caught during spot-check). It now falls through
+    # to the 90-day standard fallback, which is the conservative safe default.
+    if any(p in n for p in ["rpt yearly", "review yearly", "review 1 yr"]):
+        return 365, "Doctor note: yearly review (365d)"
     m_12 = re.search(r"r/v\s*(\d+)\s*/\s*12", n)
     if m_12:
         mo = int(m_12.group(1))
