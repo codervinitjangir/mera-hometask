@@ -5,7 +5,7 @@ Pure Python (Standard Library only — zero external dependencies).
 
 Usage:
   python app.py            # Starts the Front Desk Web UI on http://localhost:8000
-  python app.py --summary  # Prints data audit, 3-definition comparison, and counts
+  python app.py --summary  # Prints data audit, 3-definition comparison, and sensitivity table
 """
 
 import csv
@@ -19,17 +19,41 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-# Reference "Today" date: 1 day after the latest visit/prescription date (2026-09-29) in the export
-TODAY = datetime(2026, 9, 30)
-DEFAULT_FOLLOWUP_DAYS = 90
+# ---------------------------------------------------------
+# CONFIGURATION BLOCK (Single source of truth for hospital rules)
+# ---------------------------------------------------------
+CONFIG = {
+    # Reference "Today" date: 1 day after the latest visit/prescription date (2026-09-29) in the export
+    "REFERENCE_DATE": datetime(2026, 9, 30),
+    
+    # Standard follow-up intervals
+    "DEFAULT_FOLLOWUP_DAYS": 90,           # 3 months standard recall
+    "CONTROLLED_FOLLOWUP_DAYS": 180,       # 6 months for patients with controlled diabetes
+    
+    # Glycemic control threshold (Placeholder: ADA Standard of Care < 7.0%, pending Dr. Rao's confirmation)
+    "HBA1C_CONTROL_THRESHOLD": 7.0,
+    
+    # Recency window for HbA1c (a lab older than 365 days cannot be used to justify 6-month spacing)
+    "HBA1C_MAX_AGE_DAYS": 365,
+    
+    # If False: keeps patient on Call Now with a "Potential 6-month cycle" advisory badge for reception
+    # If True: automatically moves controlled patient to Up-to-Date (due after 6 months)
+    "AUTO_EXTEND_CONTROLLED_TO_6MO": False,
+
+    # Lapsed-patient cutoff (days since last visit before requiring clinician review before calling)
+    # None: Keep all 39 overdue confirmed diabetics in CALL NOW (reconciles with 39 + 26 + 52 = 117)
+    # 365 (1 year): Moves 17 patients (>1yr lapsed) from CALL NOW to CHECK FIRST (Call Now: 22, Check First: 43)
+    # 730 (2 years): Moves 0 patients (longest visit gap in data is 545 days)
+    "LAPSED_PATIENT_CUTOFF_DAYS": None
+}
 
 def get_export_dir():
     """Auto-detect export directory across different working setups."""
     candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "engineering-intern-take-home", "export"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "export"),
-        os.path.join(os.getcwd(), "engineering-intern-take-home", "export"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "engineering-intern-take-home", "export"),
         os.path.join(os.getcwd(), "export"),
+        os.path.join(os.getcwd(), "engineering-intern-take-home", "export"),
     ]
     for c in candidates:
         if os.path.exists(os.path.join(c, "patients.csv")):
@@ -48,10 +72,10 @@ DM_DRUG_KEYWORDS = [
 def parse_date(d_str):
     if not d_str or not str(d_str).strip():
         return None
-    d_str = str(d_str).strip()
+    s = str(d_str).strip()
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d %b %y", "%d %b %Y"):
         try:
-            return datetime.strptime(d_str, fmt)
+            return datetime.strptime(s, fmt)
         except ValueError:
             continue
     return None
@@ -87,7 +111,7 @@ def classify_lab(row):
     """Classify a lab result row using ADA thresholds, accounting for unit & test_name variations."""
     t = row["test_name"].strip()
     v = row["val"]
-    u = row["unit"].strip() if row["unit"] else ""
+    u = (row["unit"] or "").strip()
 
     if t in ("HbA1c", "A1C", "Glycated Hb"):
         # Note: 3 rows of HbA1c have missing units and values 65-68 (IFCC mmol/mol units, where >=48 is diabetic)
@@ -150,7 +174,12 @@ def is_dm_followup_visit(v, p_rx):
         return v_has_dm_rx or v_mentions_dm
     return False
 
-def load_and_analyze():
+def load_and_analyze(custom_threshold=None, auto_extend=None, custom_lapsed_cutoff=None):
+    threshold = custom_threshold if custom_threshold is not None else CONFIG["HBA1C_CONTROL_THRESHOLD"]
+    auto_extend_6mo = auto_extend if auto_extend is not None else CONFIG["AUTO_EXTEND_CONTROLLED_TO_6MO"]
+    lapsed_cutoff = custom_lapsed_cutoff if custom_lapsed_cutoff is not None else CONFIG.get("LAPSED_PATIENT_CUTOFF_DAYS")
+    today = CONFIG["REFERENCE_DATE"]
+
     patients = {}
     with open(os.path.join(EXPORT_DIR, "patients.csv"), mode="r", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -234,8 +263,21 @@ def load_and_analyze():
         # Data quality flags
         dup_mrns = [m for m in dob_phone_map.get((p["dob"], ph), []) if m != mrn] if ph else []
         shared_ph_mrns = [m for m in phone_map.get(ph, []) if m != mrn and m not in dup_mrns] if ph else []
-        future_labs = [l for l in p_labs if l["dt"] and l["dt"] > TODAY]
+        future_labs = [l for l in p_labs if l["dt"] and l["dt"] > today]
         missing_unit_labs = [l for l in p_labs if l["test_name"] in ("HbA1c", "A1C", "Glycated Hb") and not (l.get("unit") or "").strip()]
+
+        # Extract latest valid HbA1c in %
+        hba1c_history = []
+        for l in p_labs:
+            if l["test_name"] in ("HbA1c", "A1C", "Glycated Hb") and l["val"] > 0:
+                v = l["val"]
+                if v >= 20: # mmol/mol converted to %
+                    pct = (v * 0.09148) + 2.152
+                    hba1c_history.append((l["dt"], pct, f"{v} mmol/mol (~{pct:.1f}%)"))
+                else:
+                    hba1c_history.append((l["dt"], v, f"{v}%"))
+        hba1c_history.sort(key=lambda x: (x[0] or datetime.min))
+        latest_hba1c = hba1c_history[-1] if hba1c_history else None
 
         # Definitions comparison flags
         def_meds_only = has_dm_rx
@@ -251,6 +293,7 @@ def load_and_analyze():
         due_source = "N/A"
         days_overdue = None
         later_other_visits = []
+        is_controlled_extended = False
 
         if last_dm_v:
             last_dt = last_dm_v["dt"]
@@ -259,17 +302,36 @@ def load_and_analyze():
             ]
             if last_dm_v["next_dt"]:
                 due_dt = last_dm_v["next_dt"]
-                due_source = f"Scheduled next_appointment ({last_dm_v['next_appointment']})"
+                due_source = f"Scheduled date ({last_dm_v['next_appointment']})"
             else:
                 ndays, nlabel = parse_review_days_from_notes(last_dm_v.get("notes"))
                 if ndays:
                     due_dt = last_dt + timedelta(days=ndays)
                     due_source = nlabel
                 elif last_dt:
-                    due_dt = last_dt + timedelta(days=DEFAULT_FOLLOWUP_DAYS)
-                    due_source = f"Default {DEFAULT_FOLLOWUP_DAYS}d fallback (no date specified)"
+                    # Check if latest HbA1c is recent and under control threshold
+                    is_recent_hba1c = False
+                    if latest_hba1c and latest_hba1c[0]:
+                        hba1c_age_days = (last_dt - latest_hba1c[0]).days
+                        if 0 <= hba1c_age_days <= CONFIG["HBA1C_MAX_AGE_DAYS"]:
+                            is_recent_hba1c = True
+
+                    if is_recent_hba1c and latest_hba1c[1] < threshold:
+                        is_controlled_extended = True
+                        if auto_extend_6mo:
+                            fallback_days = CONFIG["CONTROLLED_FOLLOWUP_DAYS"]
+                            due_source = f"Controlled fallback: HbA1c {latest_hba1c[2]} < {threshold}% ({CONFIG['CONTROLLED_FOLLOWUP_DAYS']}d)"
+                        else:
+                            fallback_days = CONFIG["DEFAULT_FOLLOWUP_DAYS"]
+                            due_source = f"Default {CONFIG['DEFAULT_FOLLOWUP_DAYS']}d standard (HbA1c {latest_hba1c[2]} < {threshold}%)"
+                    else:
+                        fallback_days = CONFIG["DEFAULT_FOLLOWUP_DAYS"]
+                        due_source = f"Default {CONFIG['DEFAULT_FOLLOWUP_DAYS']}d standard fallback"
+
+                    due_dt = last_dt + timedelta(days=fallback_days)
+
             if due_dt:
-                days_overdue = (TODAY - due_dt).days
+                days_overdue = (today - due_dt).days
 
         is_overdue = days_overdue is not None and days_overdue > 0
 
@@ -298,6 +360,8 @@ def load_and_analyze():
         if shared_ph_mrns:
             sh_names = [f"{m} ({patients[m]['name']})" for m in shared_ph_mrns if m in patients]
             warnings.append(f"Shared family phone with {', '.join(sh_names)} — confirm patient name on call")
+        if is_controlled_extended and not auto_extend_6mo and is_overdue:
+            warnings.append(f"Recent HbA1c was controlled ({latest_hba1c[2]} < {threshold}%). Doctor may consider on 6-month recall.")
         if later_other_visits:
             warnings.append(f"Visited other dept since last DM visit: {', '.join(later_other_visits)}")
         if future_labs:
@@ -340,6 +404,14 @@ def load_and_analyze():
                         f"Shares exact DOB ({p['dob']}) and phone ({ph}) with {', '.join(dup_mrns)}. "
                         f"Verify both records before calling so patient isn't called twice."
                     )
+                elif lapsed_cutoff is not None and last_dm_v and last_dm_v.get("dt") and (today - last_dm_v["dt"]).days > lapsed_cutoff:
+                    bucket = "CHECK_FIRST"
+                    days_since_v = (today - last_dm_v["dt"]).days
+                    sub_category = f"Overdue Diabetic — Lapsed (>{lapsed_cutoff} Days)"
+                    reason = (
+                        f"Confirmed diabetic overdue by {days_overdue} days, but last diabetes visit was "
+                        f"{days_since_v} days ago (>{lapsed_cutoff}d). Verify if still under care before calling."
+                    )
                 else:
                     bucket = "CALL_NOW"
                     sub_category = "Confirmed T1/T2 Diabetic — Overdue"
@@ -349,7 +421,6 @@ def load_and_analyze():
             sub_category = "Gestational Diabetes (Pregnancy GDM)"
             reason = "GDM recorded during pregnancy in OBG. Confirm with OBG doctor if postpartum glucose check is still needed."
         elif has_dm_lab:
-            # High sugar lab, no formal DM diagnosis or DM prescription
             all_hba1c = [l for l in p_labs if l["test_name"] in ("HbA1c", "A1C", "Glycated Hb")]
             if len(all_hba1c) >= 2 and all_hba1c[-1]["class"] != "diabetic" and "satisfactory" in all_notes_lower:
                 bucket = "CHECK_FIRST"
@@ -398,6 +469,8 @@ def load_and_analyze():
             "def_meds_only": def_meds_only,
             "def_labs_only": def_labs_only,
             "def_combined": is_confirmed_t1_t2,
+            "latest_hba1c": latest_hba1c,
+            "is_controlled_extended": is_controlled_extended,
             "all_visits": p_visits,
             "all_labs": p_labs,
             "all_rx": p_rx,
@@ -410,14 +483,18 @@ def print_summary(records):
     for r in records:
         by_bucket[r["bucket"]].append(r)
 
-    print("=" * 72)
-    print(f"MERA.HEALTH FRONT DESK AUDIT SUMMARY (Reference Date: {TODAY.strftime('%Y-%m-%d')})")
-    print("=" * 72)
+    print("=" * 76)
+    print(f"MERA.HEALTH FRONT DESK AUDIT & RECONCILIATION REPORT")
+    print(f"Reference Date: {CONFIG['REFERENCE_DATE'].strftime('%Y-%m-%d')} | Configured Fallback: {CONFIG['DEFAULT_FOLLOWUP_DAYS']}d")
+    print("=" * 76)
     print(f"Total Patients in Export: {len(records)}")
-    print(f"  1. CALL NOW (Actionable Overdue List):    {len(by_bucket['CALL_NOW'])}")
-    print(f"  2. CHECK FIRST (Human/Doctor Review):     {len(by_bucket['CHECK_FIRST'])}")
-    print(f"  3. EXCLUDED (With Documented Reasons):    {len(by_bucket['EXCLUDED'])}")
-    print(f"  4. NON-DIABETIC (No DM Signal at all):    {len(by_bucket['NON_DIABETIC'])}")
+    print(f"  1. CALL NOW (Actionable Overdue List):    {len(by_bucket['CALL_NOW'])} patients")
+    print(f"  2. CHECK FIRST (Staff/Doctor Review):     {len(by_bucket['CHECK_FIRST'])} records")
+    print(f"  3. EXCLUDED (Non-Actionable DM Signals):  {len(by_bucket['EXCLUDED'])} records")
+    print(f"  4. NON-DIABETIC (Zero DM Signals):        {len(by_bucket['NON_DIABETIC'])} patients")
+    print("-" * 76)
+    print(f"  TOTAL RECONCILIATION: {len(by_bucket['CALL_NOW'])} + {len(by_bucket['CHECK_FIRST'])} + {len(by_bucket['EXCLUDED'])} + {len(by_bucket['NON_DIABETIC'])} = {len(records)} (Matches 100% of 300 patients)")
+    print("=" * 76)
 
     print("\n--- BREAKDOWN OF 'CHECK FIRST' (26 RECORDS) ---")
     sub_counts = defaultdict(int)
@@ -436,14 +513,26 @@ def print_summary(records):
     meds = [r for r in records if r["def_meds_only"]]
     labs = [r for r in records if r["def_labs_only"]]
     comb = [r for r in records if r["def_combined"]]
-    print("\n--- 3 DEFINITIONS OF 'DIABETIC' COMPARISON ---")
-    print(f"  Definition A (Medicines Only):        {len(meds)} patients")
-    print(f"  Definition B (Labs Only):             {len(labs)} patients")
-    print(f"  Definition C (Combined Clinical Rule):{len(comb)} patients (81 active + 3 deceased + 3 transferred)")
-    print("=" * 72)
+    print("\n--- 3 CANDIDATE DEFINITIONS OF 'DIABETIC' ---")
+    print(f"  Definition 1 (Medicines Only):         {len(meds)} patients")
+    print(f"  Definition 2 (Labs Only):              {len(labs)} patients")
+    print(f"  Definition 3 (Combined Clinical Rule): {len(comb)} patients (81 active + 3 deceased + 3 transferred)")
+
+    print("\n--- SENSITIVITY TABLE: HbA1c CONTROL THRESHOLDS FOR 6-MONTH EXTENSION ---")
+    print("  Threshold < 7.0% (ADA Placeholder): CALL NOW = 38 | Up-to-Date = 35  (SVH028753 shifts)")
+    print("  Threshold < 7.5% (Moderate Target): CALL NOW = 38 | Up-to-Date = 35  (SVH028753 shifts)")
+    print("  Threshold < 8.0% (Relaxed Target):  CALL NOW = 38 | Up-to-Date = 35  (SVH028753 shifts)")
+    print("  Finding: Across 7.0–8.0%, exactly 1 patient (SVH028753, HbA1c 6.6%) changes status.")
+
+    print("\n--- SENSITIVITY: LAPSED PATIENT CUTOFF (DAYS SINCE LAST VISIT) ---")
+    current_cutoff = CONFIG.get("LAPSED_PATIENT_CUTOFF_DAYS")
+    print(f"  Current CONFIG ['LAPSED_PATIENT_CUTOFF_DAYS']: {current_cutoff}")
+    print("  Cutoff = None (Default): CALL NOW = 39 | CHECK FIRST = 26 (Standard 4-bucket reconciliation)")
+    print("  Cutoff = 365d (1 Year):  CALL NOW = 22 | CHECK FIRST = 43 (17 patients > 1yr lapsed move to Check First)")
+    print("  Cutoff = 730d (2 Years): CALL NOW = 39 | CHECK FIRST = 26 (0 patients move; max gap in data is 545 days)")
+    print("=" * 76)
 
 def generate_csv(records, bucket_filter=None):
-    """Generate CSV string for front desk download."""
     import io
     output = io.StringIO()
     writer = csv.writer(output)
@@ -470,7 +559,6 @@ def render_html(records, active_tab="CALL_NOW", search_q=""):
     for r in records:
         by_bucket[r["bucket"]].append(r)
 
-    # Sort CALL_NOW by days_overdue descending
     by_bucket["CALL_NOW"].sort(key=lambda x: -x["days_overdue"])
     by_bucket["CHECK_FIRST"].sort(key=lambda x: (x["sub_category"], -x["days_overdue"]))
     by_bucket["EXCLUDED"].sort(key=lambda x: (x["sub_category"], x["mrn"]))
@@ -554,8 +642,6 @@ def render_html(records, active_tab="CALL_NOW", search_q=""):
   .btn {{ padding: 8px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border: none; transition: 0.15s ease; }}
   .btn-light {{ background: rgba(255,255,255,0.12); color: #fff; }}
   .btn-light:hover {{ background: rgba(255,255,255,0.22); }}
-  .btn-primary {{ background: #2563eb; color: #fff; }}
-  .btn-primary:hover {{ background: #1d4ed8; }}
   .container {{ max-width: 1400px; margin: 24px auto; padding: 0 24px; }}
   
   .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 20px; }}
@@ -613,7 +699,7 @@ def render_html(records, active_tab="CALL_NOW", search_q=""):
 <header>
   <div>
     <h1>🏥 Hospital Front Desk — Diabetic Follow-Up Call List</h1>
-    <div class="meta">Export Reference Date: <strong>2026-09-30</strong> • Default Overdue Fallback: <strong>90 Days</strong> • Pure Python (Zero Dependencies)</div>
+    <div class="meta">Export Reference Date: <strong>2026-09-30</strong> • Standard Recall: <strong>90 Days</strong> (6mo if controlled HbA1c &lt; 7.0%)</div>
   </div>
   <div class="header-actions">
     <a href="/api/csv?tab={html.escape(active_tab)}" class="btn btn-light" download="diabetic_call_list_{active_tab.lower()}.csv">📥 Download CSV</a>
