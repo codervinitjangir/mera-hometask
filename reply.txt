@@ -1,6 +1,8 @@
 Hi Meenakshi,
 
-Thank you for your clarifications. Since Dr. Rao is away until next week, we separated the Diabetic Follow-Up Call List into three clear groups so your front desk can start calling safely on Monday without needing clinical guesswork:
+Thank you for your clarifications. Dr. Rao is away, so for the questions only the doctors can answer I used careful working rules. Anyone I am unsure about is on the "Check first" list for a doctor, not the call list. Please tell me if Dr. Rao wants any rule changed.
+
+We separated the Diabetic Follow-Up Call List into three clear groups so your front desk can start calling safely on Monday:
 
 1. Call Now (39 patients): Confirmed Type 1 and Type 2 diabetic patients who are overdue and have a valid phone number. We used the doctor's noted return date (or 3 months when blank), flagged patients between 3–6 months whose sugars were noted as controlled, highlighted shared family phone numbers, and noted recent visits to other departments (like Ortho, Dental, or ENT).
 
