@@ -27,6 +27,7 @@ We compared three candidate definitions across all 300 patients (117 of whom hav
   1. Use `next_appointment` from the last qualifying diabetes visit if recorded.
   2. Otherwise, parse the doctor's explicit interval from `notes` (e.g., `r/v 3/12` = 90d, `r/v 6/12` = 180d, `review 6 wks` = 42d, `review 2 months` = 60d).
   3. Otherwise, apply a **90-day (3-month) default fallback**, or **180 days (6 months)** if the patient's recent HbA1c is documented as controlled.
+- **Bug found and fixed (`review SOS`):** An early version of the code treated `"review SOS"` as a 365-day interval. `SOS` means *"come back only if symptoms arise"* — it is not a scheduled follow-up date. The fix: `"review SOS"` now returns no interval and falls through to the 90-day standard fallback. This affected 10 patients' due-source labels but did not change any bucket assignment (all 10 were non-diabetic or in `Check First` for unrelated reasons).
 
 ### D. Update After Receiving Hospital Clarifications (22 Oct 2026)
 We received Meenakshi's reply via Arjun (recorded in full in `hospital_reply.txt`):
@@ -110,3 +111,14 @@ During manual verification against raw CSV rows across all buckets, we verified 
 1. **Unrecorded Deaths or Transfers:** Deaths/transfers are only known if typed into a visit note. Any patient who passed away at home or switched hospitals without informing staff will still appear on `Call Now`.
 2. **Appointments Booked in Another System:** `next_appointment` is blank on 71% of visits. If the front desk tracks future bookings in a separate register, some patients on `Call Now` may already have appointments.
 3. **Clinical Severity / Triage:** Sorting by days overdue does not reflect medical urgency (e.g., a patient with HbA1c `11.2%` overdue by 15 days may need a call more urgently than a well-controlled patient overdue by 200 days).
+4. **Free-text Note Parsing is Approximate:** Doctor notes are unstructured. Patterns like `r/v 3/12` or `review 6 months` are matched using heuristic regex. Any note written in an unexpected format (e.g., mixed language, abbreviation variant) will fall through to the 90-day default. The `review SOS` bug above is an example of such an assumption being incorrect.
+
+---
+
+## 6. Corrections Log — Where the Initial Agent Version Was Wrong
+
+| # | Mistake Made | How Caught | Fix Applied |
+| :--- | :--- | :--- | :--- |
+| **1** | **Naive overdue rule (single-signal from meds/labs = `CALL_NOW`)** — Initial logic treated *any* anti-diabetic medication or high HbA1c as sufficient to route patients directly to `Call Now`, including PCOS patients on Metformin and diet-controlled borderline HbA1c patients. | Manual review of patient context (PCOS notes, GDM notes, lifestyle-controlled sugars) | Three-way definition comparison (Meds / Labs / Combined Clinical Evidence). PCOS → `EXCLUDED`; GDM/borderline → `CHECK_FIRST`. |
+| **2** | **Wrong ADA page numbers** — Agent initially cited *Diabetes Care 2026; 49(Suppl 1): S91–S101* from memory. | Cross-referenced against actual PubMed Central article URL | Corrected to Section 6 (*S132–S149*), URL: [PMC12690178](https://pmc.ncbi.nlm.nih.gov/articles/PMC12690178). Added note that ADA goals are individualized defaults, not the hospital's policy. |
+| **3** | **`"review SOS"` treated as a 1-year follow-up interval** — Early code returned 365 days for notes containing `"review SOS"`, equating it with `"review yearly"`. `SOS` means *"return only if problem arises"* — it carries no scheduled date at all. | Agent's own note-parsing was reviewed critically; SOS context in raw CSVs confirmed it was used for acute/unrelated visits (Ortho, ENT, fever) | Removed `"review SOS"` from the yearly-interval match list. SOS notes now fall through to the 90-day standard default. |
