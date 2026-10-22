@@ -1,20 +1,16 @@
 Hi Meenakshi,
 
-We have prepared the Diabetic Follow-Up Call List for your front desk, ready for Monday morning. Run it with `python app.py` to open the screen in your browser.
+Thank you for your clarifications. Since Dr. Rao is away until next week, we separated the Diabetic Follow-Up Call List into three clear groups so your front desk can start calling safely on Monday without needing clinical guesswork:
 
-We divided patients into three groups so your team never makes an awkward call:
+1. Call Now (39 patients): Confirmed Type 1 and Type 2 diabetic patients who are overdue and have a valid phone number. We used the doctor's noted return date (or 3 months when blank), flagged patients between 3–6 months whose sugars were noted as controlled, highlighted shared family phone numbers, and noted recent visits to other departments (like Ortho, Dental, or ENT).
 
-1. Call Now (39 patients): Confirmed diabetic patients who are overdue for follow-up and have a phone number. We highlighted shared family phones and noted if a patient recently visited another department (like Eye or Ortho).
+2. Check First (26 records — hold for file check or Dr. Rao's input):
+- 7 records (4 people) that appear to be duplicate registrations from forgotten cards.
+- 3 overdue patients with missing phone numbers.
+- 9 patients with high sugar labs but no recorded diagnosis or medication.
+- 7 patients with pregnancy diabetes (GDM) or borderline sugar (prediabetes).
 
-2. Check First (26 records): Needs a quick check before calling:
-- 3 overdue patients missing phone numbers in the system.
-- 4 patients registered twice under duplicate file numbers.
-- 11 patients with high sugar tests who lack a doctor's diagnosis.
-- 7 patients with pregnancy diabetes or borderline sugar.
-
-3. Excluded: We safely removed 3 patients who passed away, 3 who relocated, 4 taking Metformin solely for PCOS, and 34 up-to-date diabetics.
-
-Note: Since the system only records deaths if a doctor typed it into a note, please ask staff to speak gently with patients not seen in over a year.
+3. Excluded (52 patients): 34 up-to-date diabetics, 4 PCOS patients on Metformin, 3 relocated patients, and 3 deceased patients noted in visit records.
 
 Best regards,
 Vinit

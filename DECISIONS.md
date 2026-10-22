@@ -26,12 +26,46 @@ We compared three candidate definitions across all 300 patients (117 of whom hav
 - **Due Date & Overdue Calculation:**
   1. Use `next_appointment` from the last qualifying diabetes visit if recorded.
   2. Otherwise, parse the doctor's explicit interval from `notes` (e.g., `r/v 3/12` = 90d, `r/v 6/12` = 180d, `review 6 wks` = 42d, `review 2 months` = 60d).
-  3. Otherwise, apply a **90-day (3-month) default fallback**.
-- A patient is **overdue** if `Due Date < 2026-09-30`. (Comparing parsed note intervals vs. a flat 90-day fallback changes the exact due date for 5 active patients—`SVH025313`, `SVH026153`, `SVH026167`, `SVH027348`, `SVH027925`—but all 5 remain overdue under both methods).
+  3. Otherwise, apply a **90-day (3-month) default fallback**, or **180 days (6 months)** if the patient's recent HbA1c is documented as controlled.
+
+### D. Update After Receiving Hospital Clarifications (22 Oct 2026)
+We received Meenakshi's reply via Arjun (recorded in full in `hospital_reply.txt`):
+1. **Condition Scope (T1/T2/GDM/Prediabetes/PCOS):** Meenakshi clarified she is non-clinical and Dr. Rao is away until next week, wanting *"whoever the doctors would consider diabetic."*
+   - *Handling:* Confirmed T1/T2 diabetics go to **Call Now** (if overdue); PCOS on Metformin is **Excluded**; GDM (3) and Prediabetes (4) are held in **Check First** for Dr. Rao.
+2. **High Lab Tests Without Diagnosis:** Confirmed this *"would need a doctor's input."*
+   - *Handling:* Kept in **Check First** (9 records). Front desk never makes unconfirmed diagnoses.
+3. **Follow-Up Interval (3 Months vs 6 Months if Controlled):** Meenakshi shared that *"doctors usually say every 3 months, or 6 if the sugar is under control,"* though the exact line is unstated.
+   - *Clinical Guideline Lookup:* American Diabetes Association (ADA) Standards of Care in Diabetes—2026, Section 6: *“Glycemic Goals, Hypoglycemia, and Hyperglycemic Crises: Standards of Care in Diabetes—2026”* (*Diabetes Care 2026; 49(Suppl. 1): S132–S149*, [PMC Article](https://pmc.ncbi.nlm.nih.gov/articles/PMC12690178)). The ADA recommends assessing glycemic status twice annually (every 6 months) for patients meeting treatment goals (e.g. HbA1c < 7.0%), and quarterly (every 3 months) for patients whose therapy has changed or who are not meeting goals. Note: ADA goals are individualized defaults (e.g., older or complex adults often target < 8.0%); our threshold serves as an operational placeholder until Dr. Rao confirms the hospital's specific clinical policy next week.
+   - *Sensitivity Analysis — HbA1c Thresholds:* We tested thresholds at 7.0%, 7.5%, and 8.0%:
+     - **Baseline (Flat 90d):** Call Now = 39 | Check First = 26 | Excluded = 52
+     - **Threshold < 7.0%:** Call Now = 38 | Check First = 26 | Excluded = 53
+     - **Threshold < 7.5%:** Call Now = 38 | Check First = 26 | Excluded = 53
+     - **Threshold < 8.0%:** Call Now = 38 | Check First = 26 | Excluded = 53
+     - *Key Finding:* Across all three thresholds, exactly **1 patient shifts** (`SVH028753`, Vimala P, last visit 2026-06-19, HbA1c 6.6%). This proves that the precise threshold chosen does not practically disrupt the operational call list.
+   - *Sensitivity Analysis — Lapsed Patient Cutoff:* Evaluated in `CONFIG["LAPSED_PATIENT_CUTOFF_DAYS"]`:
+     - **Cutoff = None (Default):** Call Now = 39 | Check First = 26 (Standard reconciliation; all overdue called).
+     - **Cutoff = 365d (1 Year):** Call Now = 22 | Check First = 43 (17 patients with last visit > 1 year ago move to Check First for file pull before calling).
+     - **Cutoff = 730d (2 Years):** Call Now = 39 | Check First = 26 (0 patients move; longest gap across all export patients is 545 days).
+4. **Cross-Department Visits:** Deferred for medical staff review. We display non-diabetes OPD visits as badges on screen without resetting the chronic diabetes recall clock.
+5. **Duplicate Registrations:** Meenakshi confirmed *"people sometimes re-register when they forget their card"* and she cannot confirm if records match from email alone. We strictly adhere to our non-merging policy and hold all duplicate pairs in **Check First**.
 
 ---
 
-## 2. Problems Found in the Data (and How We Handled Them)
+## 2. Complete 4-Bucket Reconciliation Table
+
+Every single one of the 300 patients in `patients.csv` maps to exactly one category:
+
+| Primary Bucket | Patient Count | Sub-Category Breakdown | Clinical / Operational Rationale |
+| :--- | :---: | :--- | :--- |
+| **1. CALL NOW** | **39** | Confirmed T1/T2 Overdue (39) | Valid phone, confirmed chronic diabetes, overdue past due date. |
+| **2. CHECK FIRST** | **26** | • High Lab, Unconfirmed Diagnosis (7)<br>• Overdue Duplicate Registrations (5)<br>• Prediabetes / Impaired Glucose (4)<br>• Overdue Diabetic, Missing Phone (3)<br>• Gestational Diabetes / GDM (3)<br>• High Lab + Duplicate MRN (2)<br>• Borderline Lab Resolved on Diet (2) | Ambiguous cases held for staff verification or Dr. Rao's input so front desk makes zero unverified calls. |
+| **3. EXCLUDED (With Signal)** | **52** | • Up-to-Date Diabetics (34)<br>• Family History / Denials Only (8)<br>• PCOS/PCOD on Metformin (4)<br>• Transferred Care / Relocated (3)<br>• Deceased / Expired in Notes (3) | Explicitly non-actionable or safely removed to prevent calling deceased families or non-diabetic women. |
+| **4. NON-DIABETIC** | **183** | Zero Diabetes Signals (183) | Patients with no diabetes diagnoses, drugs, or abnormal glucose labs. |
+| **TOTAL** | **300** | **100% Accounted For** | Exactly matches 300 patient rows in `patients.csv`. |
+
+---
+
+## 3. Problems Found in the Data (and How We Handled Them)
 
 | Problem Found | Evidence / Affected Records | Action Taken |
 | :--- | :--- | :--- |
@@ -47,35 +81,27 @@ We compared three candidate definitions across all 300 patients (117 of whom hav
 
 ---
 
-## 3. Where We Flagged for Human Check (`Check First` — 26 Records)
+## 4. Manual Spot-Check Against Raw CSVs (20 Patients Checked by Hand)
 
-Instead of guessing on clinical or administrative edge cases, we routed 26 records to the **Check First** tab:
+During manual verification against raw CSV rows across all buckets, we verified our logic and caught two clinical edge cases:
+- *Fix 1:* Pediatric Type 1 diabetics (`SVH025870`, `SVH028258`, `SVH029838`) are treated in `Paediatrics` rather than `Diabetology`/`General Medicine`. Added `Paediatrics` to qualifying follow-up departments.
+- *Fix 2:* `SVH029107` was prescribed `Inj. Human Mixtard 30/70`, which our initial drug list missed because the string `"insulin"` wasn't in the brand name. Added `mixtard`.
 
-1. **Overdue Diabetics with Missing Phone (`3`):** `SVH025063`, `SVH028319`, `SVH028414`.
-2. **Overdue Diabetics with Duplicate MRNs (`5`):** `SVH027082` (visited recently under duplicate `SVH030772` for thyroid), `SVH027863`/`SVH029322`, and `SVH027925`/`SVH029107`.
-3. **High Lab Sugar (`HbA1c >= 6.5%`) Without Diagnosis/Rx (`8`, including `2` duplicate MRNs):** `SVH025473`/`SVH029873` (Rafiq duplicate pair), `SVH026798`, `SVH027221`, `SVH027596`, `SVH029597`, `SVH029659`, `SVH029830`. Front desk should not tell a patient they are diabetic before a doctor confirms.
-4. **Borderline HbA1c Resolved with Lifestyle (`3`):** `SVH025442`, `SVH029446`, `SVH029638`.
-5. **Prediabetes / IGT (`4`):** `SVH024560`, `SVH024742`, `SVH025926`, `SVH028864`.
-6. **Gestational Diabetes (`3`):** `SVH027966`, `SVH028068`, `SVH028326`.
-
----
-
-## 4. Manual Spot-Check Against Raw CSVs (18 Patients Checked by Hand)
-
-During manual verification against raw CSV rows, we caught two issues in our initial logic and fixed them:
-- *Fix 1:* Pediatric Type 1 diabetics (`SVH025870`, `SVH028258`, `SVH029838`) are seen in `Paediatrics`, not `Diabetology`/`General Medicine`. Added `Paediatrics` to qualifying follow-up departments.
-- *Fix 2:* `SVH029107` was prescribed `Inj. Human Mixtard 30/70`, which our initial drug list missed because the string `"insulin"` wasn't in the drug name. Added `mixtard`.
-
-| MRN | Raw CSV Ground Truth | Tool Output Verified |
+| MRN | Raw CSV Ground Truth Facts | Tool Output & Verified Status |
 | :--- | :--- | :--- |
-| `SVH025339`, `SVH025698`, `SVH026086` | Notes confirm patient expired | `EXCLUDED` (Deceased) |
-| `SVH024860`, `SVH025512`, `SVH028346` | Notes confirm relocated / transferred care | `EXCLUDED` (Transferred) |
-| `SVH025191`, `SVH028876`, `SVH029693`, `SVH030554` | OBG visits for PCOS/PCOD on Metformin, HbA1c 5.0–5.4% | `EXCLUDED` (PCOS Non-Diabetic) |
-| `SVH027082` & `SVH030772` | Same DOB (`1959-05-25`) & phone; DM on `SVH027082`, thyroid on `SVH030772` | `CHECK_FIRST` (Duplicate Flag) |
-| `SVH027596` | HbA1c `65.0` with blank unit, polyuria note, awaiting report review | `CHECK_FIRST` (Unconfirmed Lab + Unit Warning) |
-| `SVH025870` & `SVH028258` | Paediatric T1DM on insulin, last seen Dec 2025 (>90d ago) | `CALL_NOW` (Overdue T1DM) |
-| `SVH029838` | Paediatric T1DM on insulin, last seen `2026-08-11` (<90d ago) | `EXCLUDED` (Up-to-Date Diabetic) |
-| `SVH026153` & `SVH028910` | Overdue for DM, but visited ENT (`2026-08-14`) / Ortho (`2026-09-05`) | `CALL_NOW` (with Other-Dept Visit badge) |
+| `SVH025030`, `SVH025870`, `SVH026153`, `SVH028258`, `SVH028910` | Confirmed T1/T2 diabetics with valid phone, overdue >90d (includes pediatric T1DM on insulin & adult OPD visits) | **CALL_NOW** (Matched) |
+| `SVH025063` | Confirmed diabetic overdue, phone blank in `patients.csv` | **CHECK_FIRST** (Missing Phone — Matched) |
+| `SVH026798` & `SVH027596` | Fasting glucose 138 mg/dL / HbA1c 65 mmol/mol without diagnosis or drugs | **CHECK_FIRST** (High Lab Unconfirmed — Matched) |
+| `SVH028326` | GDM diagnosed during OBG pregnancy visit; insulin stopped postpartum | **CHECK_FIRST** (Gestational Diabetes — Matched) |
+| `SVH029446` | Initial HbA1c 6.5% normalized to 5.7% on diet/exercise alone | **CHECK_FIRST** (Borderline Lab Resolved — Matched) |
+| `SVH027082` & `SVH030772` | Identical DOB (`1959-05-25`) & phone (`9845012345`). `SVH027082` has T2DM; `SVH030772` re-registered for Thyroid only | `SVH027082` in **CHECK_FIRST** (Duplicate flag); `SVH030772` in **NON_DIABETIC** (Matched) |
+| `SVH025473` & `SVH029873` | Identical DOB (`1956-07-14`) & phone (`9845098765`). Both have high glucose labs awaiting doctor diagnosis | Both in **CHECK_FIRST** (High Lab + Duplicate MRN — Matched) |
+| `SVH025339`, `SVH025698`, `SVH026086` | Clinical notes confirm patient expired (`SVH025339` home, `SVH026086` ICU, `SVH025698` STEMI) | **EXCLUDED** (Deceased — Matched) |
+| `SVH024860`, `SVH025512`, `SVH028346` | Clinical notes confirm relocated / transferred care to Hyderabad/Pune | **EXCLUDED** (Transferred — Matched) |
+| `SVH025191`, `SVH028876`, `SVH029693`, `SVH030554` | OBG visits for PCOS/PCOD on Metformin with normal HbA1c (`5.0%–5.4%`) | **EXCLUDED** (PCOS Non-Diabetic — Matched) |
+| `SVH029838` | Paediatric T1DM on insulin, last seen `2026-08-11` (<90d ago) | **EXCLUDED** (Up-to-Date Diabetic — Matched) |
+| `SVH030117` | Note records `"Father diabetic"`, patient has normal glucose | **EXCLUDED** (Family History Only — Matched) |
+| `SVH028753` | Last visit `2026-06-19`, HbA1c `6.6%`. Evaluated in threshold sensitivity | **CALL_NOW** (with Controlled 6mo badge — Matched) |
 
 ---
 

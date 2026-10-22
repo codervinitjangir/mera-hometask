@@ -21,8 +21,9 @@ python app.py --summary
 
 ## Repository Contents
 - **`PLAN.md`** — Initial plan committed prior to implementation.
-- **`DECISIONS.md`** — Definitions chosen, 3-rule comparison, data anomalies found, manual verification log (18 patients), and limitations.
+- **`DECISIONS.md`** — Definitions chosen, 4-bucket reconciliation, sensitivity analysis, data anomalies, manual verification log (20 patients), and limitations.
 - **`reply.txt`** — Non-technical response email to Meenakshi (<200 words).
+- **`hospital_reply.txt`** — Verbatim reply from Meenakshi via Arjun with hospital clarifications.
 - **`app.py`** — Data pipeline, clinical classification engine, and local web server (Call Now, Check First, Excluded, CSV export, and printable call sheet).
 - **`analyze.py`** — Standalone data audit and verification script.
 - **`engineering-intern-take-home/`** — Take-home brief, Meenakshi's email, and raw export CSVs.
