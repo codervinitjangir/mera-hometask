@@ -79,6 +79,7 @@ Every single one of the 300 patients in `patients.csv` maps to exactly one categ
 | **7. Mixed date formats & typos** | `lab_results.collected_on` mixes `DD Mon YY` (`2 Oct 23`) and `DD/MM/YYYY`. Two labs have future dates (`19/12/2026`, `27/02/2027`), and `V042486` (`SVH029560`) has visit date `2015-03-28` (registered `2025`). | Parsed all date formats safely and flagged future lab dates on the patient card. |
 | **8. Drug naming variations** | Prefixes (`Tab.`, `T.`, `Inj.`) and `Human Mixtard 30/70` (biphasic insulin lacking the word "Insulin"). | Included `mixtard` and normalized prefixes during matching. |
 | **9. Family history & negative note mentions** | `8` non-diabetic patients have notes like `"Father diabetic"` (`SVH030117`), `"Mother diabetic"` (`SVH025378`), or `"No h/o diabetes"` (`SVH025407`, `SVH026328`, `SVH028557`, `SVH030471`). | Stripped family-history and denial phrases before matching; placed in **Excluded**. |
+| **10. Recent lab tests without a corresponding visit row** | Several overdue patients (`SVH025030` tested `03/09/2026`, `SVH026465` tested `17/09/2026`, `SVH026535` tested `16/09/2026`) have recent sugar labs in `lab_results.csv` over a year after their last logged visit in `visits.csv`. | Kept on **Call Now** (since their lab sugar is elevated and hasn't been reviewed in a doctor visit) and added a prominent warning badge so the front desk asks them to come review their recent lab reports rather than saying they haven't visited in a year. |
 
 ---
 

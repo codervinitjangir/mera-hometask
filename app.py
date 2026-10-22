@@ -296,12 +296,18 @@ def load_and_analyze(custom_threshold=None, auto_extend=None, custom_lapsed_cuto
         due_source = "N/A"
         days_overdue = None
         later_other_visits = []
+        later_labs = []
         is_controlled_extended = False
 
         if last_dm_v:
             last_dt = last_dm_v["dt"]
             later_other_visits = [
                 f"{v['visit_date']} ({v['department']})" for v in p_visits if v["dt"] and last_dt and v["dt"] > last_dt
+            ]
+            later_labs = [
+                f"{l['collected_on']} ({l['test_name']}={l['value']})"
+                for l in p_labs
+                if l["dt"] and last_dt and last_dt < l["dt"] <= today
             ]
             if last_dm_v["next_dt"]:
                 due_dt = last_dm_v["next_dt"]
@@ -367,6 +373,8 @@ def load_and_analyze(custom_threshold=None, auto_extend=None, custom_lapsed_cuto
             warnings.append(f"Recent HbA1c was controlled ({latest_hba1c[2]} < {threshold}%). Doctor may consider on 6-month recall.")
         if later_other_visits:
             warnings.append(f"Visited other dept since last DM visit: {', '.join(later_other_visits)}")
+        if later_labs:
+            warnings.append(f"Recent lab test after last DM visit: {', '.join(later_labs)} — call to review reports with doctor")
         if future_labs:
             warnings.append(f"Data typo: Lab collected_on date in future ({future_labs[0]['collected_on']})")
         if missing_unit_labs:
